@@ -77,7 +77,7 @@ export const login = async (req, res) => {
     const user = await userModel.findOne({ email });
 
     if (!user) {
-      res.status(422).json({
+      return res.status(422).json({
         success: false,
         message: "Invalid Email",
       });
@@ -86,29 +86,33 @@ export const login = async (req, res) => {
     const isMatch = await bcrypt.compare(password, user.password);
 
     if (!isMatch) {
-      res.status(422).json({
+      return res.status(422).json({
         success: false,
         message: "Invalid Password",
       });
     }
 
-    const token = Jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
-      expiresIn: "7d",
-    });
+    const token = Jwt.sign(
+      { id: user._id },
+      process.env.JWT_SECRET,
+      {
+        expiresIn: "7d",
+      }
+    );
 
     res.cookie("token", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
-      maxAge: 7 * 24 * 60 * 1000,
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
-    res.status(201).json({
+    return res.status(200).json({
       success: true,
       message: "User Login Successfully",
     });
   } catch (error) {
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Internal Server Error",
       error: error.message,
@@ -139,12 +143,25 @@ export const logout = async (req, res) => {
 // Send Verification OTP to the User's Email
 export const sendVerifyOtp = async (req, res) => {
   try {
-    const { userId } = req.body;
+    const userId = req.userId;
 
     const user = await userModel.findById(userId);
 
+if (!user) {
+    return res.status(404).json({
+        success: false,
+        message: "User not found"
+    });
+}
+
+if (user.isAccountVerified) {
+    return res.status(400).json({
+        success: false,
+        message: "Account already verified"
+    });
+}
     if (user.isAccountVerified) {
-      return res.status(201).json({
+      return res.status(401).json({
         success: false,
         message: "Account already verified",
       });
@@ -179,54 +196,66 @@ export const sendVerifyOtp = async (req, res) => {
 };
 
 export const verifyEmail = async (req, res) => {
-  const { userId, otp } = req.body;
+      const { otp } = req.body;
+  const userId = req.userId;
 
-  if (!userId || !otp) {
-    return res.status(409).json({
+  if (!otp) {
+    return res.status(400).json({
       success: false,
-      message: "Missing Details",
+      message: "OTP is required",
     });
   }
 
-  try {
-    const user = await userModel.findById(userId);
+    try {
+        const user = await userModel.findById(userId);
 
-    if (!user) {
-      return res.status(409).json({
-        success: false,
-        message: "User not found",
-      });
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found",
+            });
+        }
+
+        if (user.isAccountVerified) {
+            return res.status(400).json({
+                success: false,
+                message: "Email already verified",
+            });
+        }
+
+        if (user.verifyOtpExpireAt < Date.now()) {
+            return res.status(400).json({
+                success: false,
+                message: "OTP expired",
+            });
+        }
+
+        const otpValue = otp.toString().trim();
+
+        if (!user.verifyOtp || user.verifyOtp !== otpValue) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid OTP",
+            });
+        }
+
+        user.isAccountVerified = true;
+        user.verifyOtp = "";
+        user.verifyOtpExpireAt = 0;
+
+        await user.save({ validateBeforeSave: false });
+
+        return res.status(200).json({
+            success: true,
+            message: "Email verified successfully",
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message,
+        });
     }
-
-    if (user.verifyOtp === "" || user.verifyOtp !== otp) {
-      return res.status(409).json({
-        success: false,
-        message: "Invalid OTP",
-      });
-    }
-
-    if (user.verifyOtpExpireAt < Date.now()) {
-      return res.status(409).json({
-        success: false,
-        message: "OTP Expired",
-      });
-    }
-
-    user.isAccountVerified = true;
-    user.verifyOtp = "";
-    user.verifyOtpExpireAt = 0;
-
-    await user.save();
-    return res.status(201).json({
-      success: true,
-      message: "Email verified successfully",
-    });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
 };
 
 // Check if user is authenticated
