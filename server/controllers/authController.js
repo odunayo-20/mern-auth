@@ -309,11 +309,16 @@ export const sendResetOtp = async (req, res) => {
 
     await transporter.sendMail(mailOptions);
 
-    res.status(201).json({
+   return res.status(201).json({
       success: true,
       message: "OTP send to your email",
     });
-  } catch (error) {}
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
 };
 
 // Reset User Password
